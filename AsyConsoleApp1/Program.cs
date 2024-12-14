@@ -1,24 +1,15 @@
 ﻿using System.Runtime.CompilerServices;
-
 namespace AsyConsoleApp1;
 
     public class Program
     {
-       
         static async Task Main(string[] args)
         {
-             await TestMethod();
-             Console.WriteLine("All Task is In Progress");
-             Console.ReadLine();
-        }
-
-        static async ZTask TestMethod()
-        {
-             var egg = FryEggsAsync(2);
-             var bacon   = FryBaconAsync(3);
-             await egg;
-             await bacon;
-            
+            var egg = FryEggsAsync(2);
+            var bacon   = FryBaconAsync(3);
+            await egg;
+            await bacon;
+            Console.WriteLine("All Task is over");
         }
         
         private static async ZTask FryEggsAsync(int howMany)
@@ -30,10 +21,9 @@ namespace AsyConsoleApp1;
             await ZTask.Delay(3000);
             Console.WriteLine("Put eggs on plate");
 
-
         }
 
-        private static async Task FryBaconAsync(int slices)
+        private static async ZTask FryBaconAsync(int slices)
         {
             Console.WriteLine($"putting {slices} slices of bacon in the pan");
             Console.WriteLine("cooking first side of bacon...");

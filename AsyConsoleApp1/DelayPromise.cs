@@ -1,29 +1,24 @@
 namespace AsyConsoleApp1;
 
-public sealed class DelayPromise : IZTaskSource
+    public sealed class DelayPromise : IZTaskSource
     {
         private Action<object> continuation;
         private object state;
         private ZTaskStatus status = ZTaskStatus.Pending;
+        private readonly object gate = new object();
         private CancellationToken cancellationToken;
-        private CancellationTokenRegistration cancellationTokenRegistration;
-
         private Timer timer;
-        private Timer progressTimer;
-        private readonly int totalDelay;
-        private int elapsedDelay;
-        private readonly Action<float> progressCallback;
 
-        private DelayPromise(int delayMilliseconds, Action<float> progressCallback)
+        private readonly int totalDelay;
+
+        private DelayPromise(int delayMilliseconds)
         {
             this.totalDelay = delayMilliseconds;
-            this.progressCallback = progressCallback;
         }
 
-        public static IZTaskSource Create(int delayMilliseconds, CancellationToken cancellationToken,
-            bool cancelImmediately, Action<float> progressCallback = null)
+        public static IZTaskSource Create(int delayMilliseconds, CancellationToken cancellationToken, bool cancelImmediately)
         {
-            var promise = new DelayPromise(delayMilliseconds, progressCallback)
+            var promise = new DelayPromise(delayMilliseconds)
             {
                 cancellationToken = cancellationToken
             };
@@ -34,28 +29,13 @@ public sealed class DelayPromise : IZTaskSource
                 return promise;
             }
 
-            // 设置一个计时器，在指定的延迟后调用 Complete 方法
-            promise.timer = new Timer(_ => { promise.Complete(); }, null, delayMilliseconds, Timeout.Infinite);
+            // 设置一个定时器，在指定的延迟后调用 Complete 方法
+            promise.timer = new Timer(_ => promise.Complete(), null, delayMilliseconds, Timeout.Infinite);
 
             // 注册取消回调
             if (cancellationToken.CanBeCanceled)
             {
-                promise.cancellationTokenRegistration = cancellationToken.Register(() =>
-                {
-                    promise.timer?.Dispose();
-                    promise.SetCanceled();
-                });
-            }
-
-            // 启动进度报告计时器
-            if (progressCallback != null)
-            {
-                promise.progressTimer = new Timer(state =>
-                {
-                    Interlocked.Add(ref promise.elapsedDelay, 100);
-                    float progress = Math.Min((float)promise.elapsedDelay / promise.totalDelay, 1f);
-                    promise.progressCallback?.Invoke(progress);
-                }, null, 0, 100); // 每100毫秒报告一次进度
+                cancellationToken.Register(() => promise.SetCanceled());
             }
 
             return promise;
@@ -63,15 +43,17 @@ public sealed class DelayPromise : IZTaskSource
 
         public ZTaskStatus GetStatus()
         {
-            
+            lock (gate)
+            {
                 return status;
-            
+            }
         }
 
         public void OnCompleted(Action<object> continuation, object state)
         {
             bool alreadyCompleted = false;
-           
+            lock (gate)
+            {
                 if (status != ZTaskStatus.Pending)
                 {
                     alreadyCompleted = true;
@@ -81,7 +63,7 @@ public sealed class DelayPromise : IZTaskSource
                     this.continuation = continuation;
                     this.state = state;
                 }
-            
+            }
 
             if (alreadyCompleted)
             {
@@ -92,21 +74,22 @@ public sealed class DelayPromise : IZTaskSource
 
         public void GetResult()
         {
-            
+            lock (gate)
+            {
                 switch (status)
                 {
                     case ZTaskStatus.Succeeded:
                         return;
                     case ZTaskStatus.Faulted:
-                        throw new InvalidOperationException("Task Faulted.");
+                        throw new InvalidOperationException("任务失败。");
                     case ZTaskStatus.Canceled:
                         throw new OperationCanceledException(cancellationToken);
                     case ZTaskStatus.Pending:
-                        throw new InvalidOperationException("Task is still pending.");
+                        throw new InvalidOperationException("任务仍处于挂起状态。");
                     default:
-                        throw new InvalidOperationException("Unknown task status.");
+                        throw new InvalidOperationException("未知任务状态。");
                 }
-            
+            }
         }
 
         private void Complete()
@@ -114,26 +97,19 @@ public sealed class DelayPromise : IZTaskSource
             Action<object> toInvoke = null;
             object toState = null;
 
-            
+            lock (gate)
+            {
                 if (status == ZTaskStatus.Pending)
                 {
                     status = ZTaskStatus.Succeeded;
                     toInvoke = continuation;
                     toState = state;
                 }
-            
-
-            // 在锁外调用回调，防止死锁
-            if (toInvoke != null)
-            {
-                Console.WriteLine("Task completed successfully.");
-                toInvoke.Invoke(toState);
             }
 
-            // 释放资源
+            // 在锁外调用回调，防止死锁
+            toInvoke?.Invoke(toState);
             timer?.Dispose();
-            progressTimer?.Dispose();
-            cancellationTokenRegistration.Dispose();
         }
 
         private void SetCanceled()
@@ -141,25 +117,18 @@ public sealed class DelayPromise : IZTaskSource
             Action<object> toInvoke = null;
             object toState = null;
 
-           
-            if (status == ZTaskStatus.Pending)
+            lock (gate)
             {
+                if (status == ZTaskStatus.Pending)
+                {
                     status = ZTaskStatus.Canceled;
                     toInvoke = continuation;
                     toState = state;
+                }
             }
-            
 
             // 在锁外调用回调，防止死锁
-            if (toInvoke != null)
-            {
-                Console.WriteLine("Task was canceled.");
-                toInvoke.Invoke(toState);
-            }
-
-            // 释放资源
+            toInvoke?.Invoke(toState);
             timer?.Dispose();
-            progressTimer?.Dispose();
-            cancellationTokenRegistration.Dispose();
         }
     }

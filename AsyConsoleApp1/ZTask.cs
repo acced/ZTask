@@ -20,25 +20,18 @@ public enum ZTaskStatus
 
 
 [AsyncMethodBuilder(typeof(CustomAsyncMethodBuilder))]
-public struct ZTask(IZTaskSource source)
+public  struct ZTask(IZTaskSource source)
 {
-    readonly IZTaskSource source = source;
-
     // 实现 GetAwaiter 方法
-    public ZTaskAwaiter GetAwaiter()
-    {
-        return new ZTaskAwaiter(source);
-    }
+    public ZTaskAwaiter GetAwaiter() => new ZTaskAwaiter(source);
 
-    public static ZTask Delay(int millisecondsDelay, CancellationToken cancellationToken = default,
-        bool cancelImmediately = false)
+    // 延迟任务
+    public static ZTask Delay(int millisecondsDelay, CancellationToken cancellationToken = default, bool cancelImmediately = false)
     {
         if (millisecondsDelay < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(millisecondsDelay),
-                "Delay does not allow negative delay time.");
+            throw new ArgumentOutOfRangeException(nameof(millisecondsDelay), "Delay 不允许负延迟时间。");
         }
-
         var source = DelayPromise.Create(millisecondsDelay, cancellationToken, cancelImmediately);
         return new ZTask(source);
     }

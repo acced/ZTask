@@ -2,7 +2,7 @@ using System.Runtime.CompilerServices;
 
 namespace AsyConsoleApp1;
 
-   public class CustomAsyncMethodBuilder
+    public class CustomAsyncMethodBuilder
     {
         private ZTaskCompletionSource _tcs;
 
@@ -13,12 +13,10 @@ namespace AsyConsoleApp1;
         }
 
         // 必需的 Create 方法
-        public static CustomAsyncMethodBuilder Create()
-            => new CustomAsyncMethodBuilder();
+        public static CustomAsyncMethodBuilder Create() => new CustomAsyncMethodBuilder();
 
         // 必需的 Start 方法
-        public void Start<TStateMachine>(ref TStateMachine stateMachine)
-            where TStateMachine : IAsyncStateMachine
+        public void Start<TStateMachine>(ref TStateMachine stateMachine) where TStateMachine : IAsyncStateMachine
         {
             Console.WriteLine("CustomAsyncMethodBuilder Start");
             stateMachine.MoveNext();
@@ -39,8 +37,7 @@ namespace AsyConsoleApp1;
         }
 
         // 必需的 AwaitOnCompleted 方法
-        public void AwaitOnCompleted<TAwaiter, TStateMachine>(
-            ref TAwaiter awaiter, ref TStateMachine stateMachine)
+        public void AwaitOnCompleted<TAwaiter, TStateMachine>(ref TAwaiter awaiter, ref TStateMachine stateMachine)
             where TAwaiter : INotifyCompletion
             where TStateMachine : IAsyncStateMachine
         {
@@ -49,91 +46,93 @@ namespace AsyConsoleApp1;
         }
 
         // 必需的 AwaitUnsafeOnCompleted 方法
-        public void AwaitUnsafeOnCompleted<TAwaiter, TStateMachine>(
-            ref TAwaiter awaiter, ref TStateMachine stateMachine)
+        public void AwaitUnsafeOnCompleted<TAwaiter, TStateMachine>(ref TAwaiter waiter, ref TStateMachine stateMachine)
             where TAwaiter : ICriticalNotifyCompletion
             where TStateMachine : IAsyncStateMachine
         {
             Console.WriteLine("CustomAsyncMethodBuilder AwaitUnsafeOnCompleted");
-            awaiter.OnCompleted(stateMachine.MoveNext);
+            waiter.OnCompleted(stateMachine.MoveNext);
         }
 
-
+        // 缺少的 SetStateMachine 方法
         public void SetStateMachine(IAsyncStateMachine stateMachine)
         {
             // 通常不需要在这里执行任何操作
         }
 
-
+        // 缺少的 Task 属性
         public ZTask Task => _tcs.Task;
     }
 
-   public class ZTaskCompletionSource : IZTaskSource
-   {
-       CancellationToken cancellationToken;
-       Action<object> singleContinuation;
-       List<(Action<object>, object)> secondaryContinuationList;
+  public class ZTaskCompletionSource : IZTaskSource
+    {
+        private Action<object> continuation;
+        private object state;
+        private ZTaskStatus status = ZTaskStatus.Pending;
+        private readonly object gate = new object();
+        private CancellationToken cancellationToken;
+        private Timer timer;
 
-       int intStatus; // ZTaskStatus
-       bool handled = false;
+        public ZTask Task => new ZTask(this);
 
-       public ZTaskCompletionSource()
-       {
+        public ZTaskStatus GetStatus() => status;
 
-       }
+        public void OnCompleted(Action<object> continuation, object state)
+        {
+            lock (gate)
+            {
+                if (status == ZTaskStatus.Pending)
+                {
+                    this.continuation = continuation;
+                    this.state = state;
+                }
+                else
+                {
+                    continuation(state);
+                }
+            }
+        }
 
-       internal void MarkHandled()
-       {
-           if (!handled)
-           {
-               handled = true;
+        public void GetResult()
+        {
+            lock (gate)
+            {
+                switch (status)
+                {
+                    case ZTaskStatus.Succeeded:
+                        return;
+                    case ZTaskStatus.Faulted:
+                        throw new InvalidOperationException("任务失败。");
+                    case ZTaskStatus.Canceled:
+                        throw new OperationCanceledException(cancellationToken);
+                    default:
+                        throw new InvalidOperationException("任务状态无效");
+                }
+            }
+        }
 
-           }
-       }
+        public void SetResult(object state = null)
+        {
+            lock (gate)
+            {
+                status = ZTaskStatus.Succeeded;
+                continuation?.Invoke(state);
+            }
+        }
 
-       public ZTask Task
-       {
-           get { return new ZTask(this); }
-       }
+        public void SetException(Exception exception)
+        {
+            lock (gate)
+            {
+                status = ZTaskStatus.Faulted;
+            }
+        }
 
-
-       public void GetResult()
-       {
-           MarkHandled();
-
-           var status = (ZTaskStatus)intStatus;
-           switch (status)
-           {
-               case ZTaskStatus.Succeeded:
-                   return;
-               case ZTaskStatus.Faulted:
-                   //exception.GetException().Throw();
-                   return;
-               case ZTaskStatus.Canceled:
-                   throw new OperationCanceledException(cancellationToken);
-               default:
-               case ZTaskStatus.Pending:
-                   //throw new InvalidOperationException("not yet completed.");
-                   return;
-           }
-       }
-
-       public ZTaskStatus GetStatus()
-       {
-           return (ZTaskStatus)intStatus;
-       }
-
-
-
-
-       public void OnCompleted(Action<object> continuation, object state)
-       {
-           continuation(state);
-       }
-
-
-       public void SetResult(object o)
-       {
-
-       }
-   }
+        public void SetCanceled()
+        {
+            lock (gate)
+            {
+                status = ZTaskStatus.Canceled;
+            }
+        }
+    }
